@@ -113,8 +113,8 @@ jobs:
           ZAPPA_PACKAGE_PATH=$(find "${{ env.ZAPPA_BUCKET }}" -type f -iname '*.zip')
           cd ../${{ env.INFRA_FOLDER }}
           echo $ZAPPA_PACKAGE_PATH
-          . ${{ env.INFRA_FOLDER }}/bin/activate
           ZAPPA_LAMBDA_PACKAGE=$ZAPPA_PACKAGE_PATH cdk bootstrap
+          deactivate
       - name: Step 8 - Synth cloudformation stack on aws
         run: |
           . ${{ env.INFRA_VENV }}/bin/activate
