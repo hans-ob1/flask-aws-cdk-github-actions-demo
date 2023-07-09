@@ -106,7 +106,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           deactivate
-      - name: Step 7 - Synth cloudformation stack on aws
+      - name: Step 7 - [Staging] Run bootstrap command (Optional)
+        run: |
+          . ${{ env.INFRA_VENV }}/bin/activate
+          cd ../${{ env.SRC_FOLDER }}
+          ZAPPA_PACKAGE_PATH=$(find "${{ env.ZAPPA_BUCKET }}" -type f -iname '*.zip')
+          cd ../${{ env.INFRA_VENV }}
+          echo $ZAPPA_PACKAGE_PATH
+          . ${{ env.INFRA_VENV }}/bin/activate
+          ZAPPA_LAMBDA_PACKAGE=$ZAPPA_PACKAGE_PATH cdk bootstrap
+      - name: Step 8 - Synth cloudformation stack on aws
         run: |
           . ${{ env.INFRA_VENV }}/bin/activate
           cd ../${{ env.SRC_FOLDER }}
@@ -115,7 +124,7 @@ jobs:
           echo $ZAPPA_PACKAGE_PATH
           ZAPPA_LAMBDA_PACKAGE=$ZAPPA_PACKAGE_PATH cdk synth
           deactivate
-      - name: Step 8 - Deploy cloudformation stack on aws
+      - name: Step 9 - Deploy cloudformation stack on aws
         run: |
           . ${{ env.INFRA_VENV }}/bin/activate
           cd ../${{ env.SRC_FOLDER }}
