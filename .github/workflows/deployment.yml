@@ -1,0 +1,125 @@
+name: Simple Flask App Deployment CI/CD
+
+on: 
+  push:
+    branches:
+      - main
+
+env:
+  ZAPPA_BUCKET: zappa-artifact
+  SRC_FOLDER: src
+  INFRA_FOLDER: infra
+  SRC_VENV: venv-api
+  INFRA_VENV: venv-cdk
+  NODE_VERSION: 16
+
+jobs:
+  package_code:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8]
+        zappa-env: [dev]
+    defaults:
+      run:
+        working-directory: ${{ env.SRC_FOLDER }}
+    steps:
+      - name: Step 1 - Checkout code repo for flask app
+        uses: actions/checkout@v3
+        with:
+          ref: main
+      - name: Step 2 - Setup python for flask app
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Step 3 - Create python venv and install dependencies
+        run: |
+          pip install virtualenv
+          python -m virtualenv ${{ env.SRC_VENV }}
+          . ${{ env.SRC_VENV }}/bin/activate
+          python -m pip install --upgrade pip
+          pip install zappa
+          pip install -r requirements.txt
+          deactivate
+      - name: Step 4 - Create upload folder to store zappa files
+        run: mkdir -p ${{ env.ZAPPA_BUCKET }}
+      - name: Step 5 - Package files to zip using Zappa
+        run: |
+          . ${{ env.SRC_VENV }}/bin/activate
+          ZAPPA_LAMBDA_PACKAGE="$(cut -d' ' -f3 <<< `zappa package ${{ matrix.zappa-env }} | tail -n 1`)"
+          echo Package zipped as: $ZAPPA_LAMBDA_PACKAGE
+          mv $ZAPPA_LAMBDA_PACKAGE ${{ env.ZAPPA_BUCKET }}
+          deactivate
+      - name: Step 6 - Upload zappa artifact from packaging
+        uses: actions/upload-artifact@master
+        with:
+            name: Final flask package zipped by Zappa
+            path: ${{ env.SRC_FOLDER }}/${{ env.ZAPPA_BUCKET }}
+      
+  deploy_code:
+    needs: package_code
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8]
+        zappa-env: [dev]
+    defaults:
+      run:
+        working-directory: ${{ env.INFRA_FOLDER }}
+    steps:
+      - name: Step 1 - Checkout api cdk infra folder
+        uses: actions/checkout@v3
+        with:
+          ref: main
+      - name: Step 2 - Download artifacts to destinated folder
+        uses: actions/download-artifact@master
+        with:
+          name: Final flask package zipped by Zappa
+          path: ${{ env.SRC_FOLDER }}/${{ env.ZAPPA_BUCKET }}
+      - name: Step 3 - Setup node dependency for aws cdk
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Step 4 - Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: 'us-east-1'
+      - name: Step 5 - Install dependencies for cdk
+        run: |
+          echo $(pwd)
+          python -m pip install --upgrade pip
+          npm install -g aws-cdk
+      - name: Step 6 - Create python venv and install other dependencies
+        run: |
+          echo $(pwd)
+          pip install virtualenv
+          python -m virtualenv ${{ env.INFRA_VENV }}
+          . ${{ env.INFRA_VENV }}/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          deactivate
+      - name: Step 7 - Synth cloudformation stack on aws
+        run: |
+          . ${{ env.INFRA_VENV }}/bin/activate
+          cd ../${{ env.SRC_FOLDER }}
+          ZAPPA_PACKAGE_PATH=$(find "${{ env.ZAPPA_BUCKET }}" -type f -iname '*.zip')
+          cd ../${{ env.INFRA_FOLDER }}
+          echo $ZAPPA_PACKAGE_PATH
+          ZAPPA_LAMBDA_PACKAGE=$ZAPPA_PACKAGE_PATH cdk synth
+          deactivate
+      - name: Step 8 - Deploy cloudformation stack on aws
+        run: |
+          . ${{ env.INFRA_VENV }}/bin/activate
+          cd ../${{ env.SRC_FOLDER }}
+          ZAPPA_PACKAGE_PATH=$(find "${{ env.ZAPPA_BUCKET }}" -type f -iname '*.zip')
+          cd ../${{ env.INFRA_FOLDER }}
+          ZAPPA_LAMBDA_PACKAGE=$ZAPPA_PACKAGE_PATH cdk deploy --all --require-approval never
+          deactivate
